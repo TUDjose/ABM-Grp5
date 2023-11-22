@@ -8,5 +8,6 @@
 /dataSources.local.xml
 
 # jupyter stuff
+/tutorials/
 .ipynb_checkpoints
 .ipynb
