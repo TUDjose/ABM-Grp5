@@ -1,4 +1,3 @@
-# Importing necessary libraries
 import networkx as nx
 from mesa import Model, Agent
 from mesa.time import RandomActivation
@@ -7,6 +6,9 @@ from mesa.datacollection import DataCollector
 import geopandas as gpd
 import rasterio as rs
 import matplotlib.pyplot as plt
+import numpy as np
+from scipy.stats import truncnorm
+from matplotlib.transforms import Affine2D
 import random
 
 # Import the agent class(es) from agents.py
@@ -24,37 +26,40 @@ class AdaptationModel(Model):
     simulates their behavior, and collects data. The network type can be adjusted based on study requirements.
     """
 
-    def __init__(self, 
-                 seed = None,
-                 number_of_households = 25, # number of household agents
-                 # Simplified argument for choosing flood map. Can currently be "harvey", "100yr", or "500yr".
+    def __init__(self,
+                 seed=None,
+                 number_of_households=25,
                  flood_map_choice='harvey',
-                 # ### network related parameters ###
-                 # The social network structure that is used.
-                 # Can currently be "erdos_renyi", "barabasi_albert", "watts_strogatz", or "no_network"
-                 network = 'watts_strogatz',
-                 # likeliness of edge being created between two nodes
-                 probability_of_network_connection = 0.4,
-                 # number of edges for BA network
-                 number_of_edges = 3,
-                 # number of nearest neighbours for WS social network
-                 number_of_nearest_neighbours = 5,
+                 network='watts_strogatz',
+                 probability_of_network_connection=0.4,
+                 number_of_edges=3,
+                 number_of_nearest_neighbours=5,
+                 polarization=0.5,  # 0 - 1 (exclusive)
+                 cost_of_adaptation=30000,
+                 friend_radius=1,
+                 p_seed=0
                  ):
-        
-        super().__init__(seed = seed)
-        
+
+        super().__init__(seed=seed)
+
+        # model parameters
+        self.polarization = polarization
+        self.cost_of_adaptation = cost_of_adaptation
+        self.friend_radius = friend_radius
+
         # defining the variables and setting the values
         self.number_of_households = number_of_households  # Total number of household agents
         self.seed = seed
+        self.p_seed = p_seed
 
         # network
-        self.network = network # Type of network to be created
+        self.network = network  # Type of network to be created
         self.probability_of_network_connection = probability_of_network_connection
         self.number_of_edges = number_of_edges
         self.number_of_nearest_neighbours = number_of_nearest_neighbours
 
         # generating the graph according to the network used and the network parameters specified
-        self.G = self.initialize_network()
+        self.G = self.initialize_network(type='rev_normal')
         # create grid out of network graph
         self.grid = NetworkGrid(self.G)
 
@@ -70,54 +75,53 @@ class AdaptationModel(Model):
             self.schedule.add(household)
             self.grid.place_agent(agent=household, node_id=node)
 
-        # You might want to create other agents here, e.g. insurance agents.
-
         # Data collection setup to collect data
         model_metrics = {
-                        "total_adapted_households": self.total_adapted_households,
-                        # ... other reporters ...
-                        }
-        
+            "total_adapted_households": self.total_adapted_households,
+            "total_positive_opinions": self.total_opinions,
+            "total_negative_opinions": lambda m: self.number_of_households - self.total_opinions()
+        }
         agent_metrics = {
-                        "FloodDepthEstimated": "flood_depth_estimated",
-                        "FloodDamageEstimated" : "flood_damage_estimated",
-                        "FloodDepthActual": "flood_depth_actual",
-                        "FloodDamageActual" : "flood_damage_actual",
-                        "IsAdapted": "is_adapted",
-                        "FriendsCount": lambda a: a.count_friends(radius=1),
-                        "location":"location",
-                        # ... other reporters ...
-                        }
-        #set up the data collector 
+            "FloodDamageEstimated": "flood_damage_estimated",
+            "IsAdapted": "is_adapted",
+            "opinion": "opinion",
+            "loss": "loss"
+        }
         self.datacollector = DataCollector(model_reporters=model_metrics, agent_reporters=agent_metrics)
-            
 
-    def initialize_network(self):
+    def get_random_weight(self, stdev):
+        # np.random.seed(self.p_seed)
+        stdev = 1 - stdev
+        a, b = (0 - 0.5) / stdev, (1 - 0.5) / stdev
+        x = np.linspace(0, 1, 1000)
+        y = truncnorm.pdf(x, a, b, loc=0.5, scale=stdev)
+        reflection_transform = Affine2D().scale(1, -1).translate(0, np.max(y) + np.min(y))
+        reflected_line = reflection_transform.transform_affine(np.column_stack((x, y)))
+        w = np.random.choice(reflected_line[:, 0], p=reflected_line[:, 1] / np.sum(reflected_line[:, 1]))
+        return np.around(w, 3)
+
+    def random_weight(self, stdev):
+        # np.random.seed(0)
+        a, b = (0 - 0.5) / stdev, (1 - 0.5) / stdev
+        return truncnorm.rvs(a, b, loc=0.5, scale=stdev)
+
+    def initialize_network(self, type='uniform'):
         """
         Initialize and return the social network graph based on the provided network type using pattern matching.
         """
-        if self.network == 'erdos_renyi':
-            return nx.erdos_renyi_graph(n=self.number_of_households,
-                                        p=self.number_of_nearest_neighbours / self.number_of_households,
-                                        seed=self.seed)
-        elif self.network == 'barabasi_albert':
-            return nx.barabasi_albert_graph(n=self.number_of_households,
-                                            m=self.number_of_edges,
-                                            seed=self.seed)
-        elif self.network == 'watts_strogatz':
-            return nx.watts_strogatz_graph(n=self.number_of_households,
+        graph = nx.watts_strogatz_graph(n=self.number_of_households,
                                         k=self.number_of_nearest_neighbours,
                                         p=self.probability_of_network_connection,
                                         seed=self.seed)
-        elif self.network == 'no_network':
-            G = nx.Graph()
-            G.add_nodes_from(range(self.number_of_households))
-            return G
-        else:
-            raise ValueError(f"Unknown network type: '{self.network}'. "
-                            f"Currently implemented network types are: "
-                            f"'erdos_renyi', 'barabasi_albert', 'watts_strogatz', and 'no_network'")
+        if type == 'uniform':
+            np.random.seed(self.p_seed)
+            for edge in graph.edges:
+                graph.edges[edge]["weight"] = np.random.uniform(0, 1)
+        elif type == 'rev_normal':
+            for edge in graph.edges:
+                graph.edges[edge]["weight"] = self.get_random_weight(self.polarization)
 
+        return graph
 
     def initialize_maps(self, flood_map_choice):
         """
@@ -145,10 +149,14 @@ class AdaptationModel(Model):
 
     def total_adapted_households(self):
         """Return the total number of households that have adapted."""
-        #BE CAREFUL THAT YOU MAY HAVE DIFFERENT AGENT TYPES SO YOU NEED TO FIRST CHECK IF THE AGENT IS ACTUALLY A HOUSEHOLD AGENT USING "ISINSTANCE"
+        # BE CAREFUL THAT YOU MAY HAVE DIFFERENT AGENT TYPES SO YOU NEED TO FIRST CHECK IF THE AGENT IS ACTUALLY A HOUSEHOLD AGENT USING "ISINSTANCE"
         adapted_count = sum([1 for agent in self.schedule.agents if isinstance(agent, Households) and agent.is_adapted])
         return adapted_count
-    
+
+    def total_opinions(self):
+        count = sum([1 for agent in self.schedule.agents if isinstance(agent, Households) and agent.opinion == 1])
+        return count
+
     def plot_model_domain_with_agents(self):
         fig, ax = plt.subplots()
         # Plot the model domain
@@ -160,7 +168,8 @@ class AdaptationModel(Model):
         for agent in self.schedule.agents:
             color = 'blue' if agent.is_adapted else 'red'
             ax.scatter(agent.location.x, agent.location.y, color=color, s=10, label=color.capitalize() if not ax.collections else "")
-            ax.annotate(str(agent.unique_id), (agent.location.x, agent.location.y), textcoords="offset points", xytext=(0,1), ha='center', fontsize=9)
+            ax.annotate(str(agent.unique_id), (agent.location.x, agent.location.y), textcoords="offset points", xytext=(0, 1), ha='center',
+                        fontsize=9)
         # Create legend with unique entries
         handles, labels = ax.get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
@@ -172,23 +181,49 @@ class AdaptationModel(Model):
         plt.ylabel('Latitude')
         plt.show()
 
+    @staticmethod
+    def nominal_opinions(model, network, grid, radius):
+        """
+        Method used to set the opinions of the agents in the model. Nominal opinions are set based on the equation:
+            O(i,t+1) = Sign(Sum(w(i,j) * O(j,t)))
+        where: O(i,t+1) is the opinion of agent i at time t+1
+               w(i,j) is the weight of the edge between agent i and agent j
+               O(j,t) is the opinion of neighboring agent j at time t
+        O(i, t) is the opinion of agent i at time t, considered ti be either -1 or 1
+
+        params:
+            mesa_model: the mesa model
+            network: graph/network connecting the agents in the model with edges
+            grid: mesa grid (created from the network) to find the neighbors of each agent
+            radius: the radius of the network (number of edges away) to be considered as the neighborhood of an agent
+        """
+        # Iterate over all agents in the model
+        for agent in model.schedule.agents:
+            # find all (social) neighbors of the agent
+            neighbors = grid.get_neighborhood(agent.pos, include_center=False, radius=radius)
+            # get the weights of the edges between the agent and its neighbors
+            weights = [network[agent.unique_id][neighbor]['weight'] for neighbor in neighbors]
+            # get the opinions of the neighbors
+            opinions = [model.schedule.agents[neighbor].opinion for neighbor in neighbors]
+            # calculate the new opinion of the agent based on the equation above
+            new_opinion = 1 if sum([weight * opinion for weight, opinion in zip(weights, opinions)]) >= 0 else -1
+            # update the opinion of the current agent
+            agent.opinion = new_opinion
+
     def step(self):
         """
-        introducing a shock: 
-        at time step 5, there will be a global flooding.
-        This will result in actual flood depth. Here, we assume it is a random number
-        between 0.5 and 1.2 of the estimated flood depth. In your model, you can replace this
-        with a more sound procedure (e.g., you can devide the floop map into zones and 
-        assume local flooding instead of global flooding). The actual flood depth can be 
-        estimated differently
+        At step 7 there will be a flood
         """
-        if self.schedule.steps == 5:
+
+        # adapt agents right before flood
+        if self.schedule.steps == 7:
             for agent in self.schedule.agents:
-                # Calculate the actual flood depth as a random number between 0.5 and 1.2 times the estimated flood depth
-                agent.flood_depth_actual = random.uniform(0.5, 1.2) * agent.flood_depth_estimated
-                # calculate the actual flood damage given the actual flood depth
-                agent.flood_damage_actual = calculate_basic_flood_damage(agent.flood_depth_actual)
-        
+                if agent.flood_damage_estimated * 100000 > agent.loss_tolerance + self.cost_of_adaptation:
+                    agent.is_adapted = True
+
+        # update opinions
+        AdaptationModel.nominal_opinions(self, self.G, self.grid, self.friend_radius)
+
         # Collect data and advance the model by one step
         self.datacollector.collect(self)
         self.schedule.step()

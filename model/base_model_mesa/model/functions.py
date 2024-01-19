@@ -12,33 +12,35 @@ from shapely import contains_xy
 from shapely import prepare
 import geopandas as gpd
 
+
 def set_initial_values(input_data, parameter, seed):
     """
     Function to set the values based on the distribution shown in the input data for each parameter.
     The input data contains which percentage of households has a certain initial value.
-    
+
     Parameters
     ----------
     input_data: the dataframe containing the distribution of paramters
     parameter: parameter name that is to be set
     seed: agent's seed
-    
+
     Returns
     -------
-    parameter_set: the value that is set for a certain agent for the specified parameter 
+    parameter_set: the value that is set for a certain agent for the specified parameter
     """
     parameter_set = 0
-    parameter_data = input_data.loc[(input_data.parameter == parameter)] # get the distribution of values for the specified parameter
+    parameter_data = input_data.loc[(input_data.parameter == parameter)]  # get the distribution of values for the specified parameter
     parameter_data = parameter_data.reset_index()
     random.seed(seed)
-    random_parameter = random.randint(0,100) 
+    random_parameter = random.randint(0, 100)
     for i in range(len(parameter_data)):
         if i == 0:
             if random_parameter < parameter_data['value_for_input'][i]:
                 parameter_set = parameter_data['value'][i]
                 break
         else:
-            if (random_parameter >= parameter_data['value_for_input'][i-1]) and (random_parameter <= parameter_data['value_for_input'][i]):
+            if (random_parameter >= parameter_data['value_for_input'][i - 1]) and (
+                    random_parameter <= parameter_data['value_for_input'][i]):
                 parameter_set = parameter_data['value'][i]
                 break
             else:
@@ -49,7 +51,7 @@ def set_initial_values(input_data, parameter, seed):
 def get_flood_map_data(flood_map):
     """
     Getting the flood map characteristics.
-    
+
     Parameters
     ----------
     flood_map: flood map in tif format
@@ -64,6 +66,7 @@ def get_flood_map_data(flood_map):
     bound_t = flood_map.bounds.top
     bound_b = flood_map.bounds.bottom
     return band, bound_l, bound_r, bound_t, bound_b
+
 
 shapefile_path = r'../input_data/model_domain/houston_model/houston_model.shp'
 floodplain_path = r'../input_data/floodplain/floodplain_area.shp'
@@ -83,6 +86,7 @@ floodplain_geoseries = floodplain_gdf['geometry']
 floodplain_multipolygon = floodplain_geoseries[0]  # The geoseries contains only one multipolygon
 prepare(floodplain_multipolygon)
 
+
 def generate_random_location_within_map_domain():
     """
     Generate random location coordinates within the map domain polygon.
@@ -99,11 +103,12 @@ def generate_random_location_within_map_domain():
         if contains_xy(map_domain_polygon, x, y):
             return x, y
 
+
 def get_flood_depth(corresponding_map, location, band):
-    """ 
+    """
     To get the flood depth of a specific location within the model domain.
     Households are placed randomly on the map, so the distribution does not follow reality.
-    
+
     Parameters
     ----------
     corresponding_map: flood map used
@@ -115,15 +120,15 @@ def get_flood_depth(corresponding_map, location, band):
     depth: flood depth at the given location
     """
     row, col = corresponding_map.index(location.x, location.y)
-    depth = band[row -1, col -1]
+    depth = band[row - 1, col - 1]
     return depth
-    
+
 
 def get_position_flood(bound_l, bound_r, bound_t, bound_b, img, seed):
-    """ 
+    """
     To generater the position on flood map for a household.
     Households are placed randomly on the map, so the distribution does not follow reality.
-    
+
     Parameters
     ----------
     bound_l, bound_r, bound_t, bound_b, img: characteristics of the flood map data (.tif file)
@@ -140,12 +145,13 @@ def get_position_flood(bound_l, bound_r, bound_t, bound_b, img, seed):
     row, col = img.index(x, y)
     return x, y, row, col
 
+
 def calculate_basic_flood_damage(flood_depth):
     """
     To get flood damage based on flood depth of household
     from de Moer, Huizinga (2017) with logarithmic regression over it.
     If flood depth > 6m, damage = 1.
-    
+
     Parameters
     ----------
     flood_depth : flood depth as given by location within model domain
@@ -162,4 +168,3 @@ def calculate_basic_flood_damage(flood_depth):
         # see flood_damage.xlsx for function generation
         flood_damage = 0.1746 * math.log(flood_depth) + 0.6483
     return flood_damage
-
