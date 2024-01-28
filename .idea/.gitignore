@@ -12,4 +12,5 @@
 .ipynb
 
 # results
-model/base_model_mesa/model/results/
+results/
+dataframes/

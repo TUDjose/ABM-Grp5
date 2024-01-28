@@ -1,7 +1,6 @@
 from mesa import Agent
 from shapely.geometry import Point
 from shapely import contains_xy
-import numpy as np
 
 # Import functions from functions.py
 from functions import generate_random_location_within_map_domain, get_flood_depth, calculate_basic_flood_damage, floodplain_multipolygon

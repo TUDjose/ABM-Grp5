@@ -45,18 +45,24 @@ import pathlib
 
 
 
-def run_model(p, n=100, plot=False, steps=15):
+def run_model(p, n, plot=False):
     model = AdaptationModel(seed=0, number_of_households=n, flood_map_choice="harvey", polarization=p, threshold=0.5)
-    for step in range(steps):
+    for step in range(15):
         if plot: model.plot_network(big=True, labels=True)
         model.step()
     if plot: model.plot_network(big=True, labels=True)
+
+    dir = f'dataframes/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
+    pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
+    model.datacollector.get_agent_vars_dataframe().to_csv(f'{dir}/agent_df.csv')
+    model.datacollector.get_model_vars_dataframe().to_csv(f'{dir}/model_df.csv')
+
     return model, model.datacollector.get_agent_vars_dataframe(), model.datacollector.get_model_vars_dataframe()
 
 def run_simulation(p):
     arr = []
     for i in range(500):
-        model, agent_df, model_df = run_model(p, n=100, plot=False)
+        model, agent_df, model_df = run_model(p=p, n=100, plot=False)
         arr.append(model_df.iloc[-1]["winners"])
     return p, arr
 
@@ -88,5 +94,3 @@ def run_batch():
 
     np.savetxt(f"{dir}/hist_data.csv", np.array(res), delimiter=",")
 
-if __name__ == "__main__":
-    run_batch()

@@ -8,7 +8,6 @@ import rasterio as rs
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import truncnorm
-from statistics import mode
 
 # Import the agent class(es) from agents.py
 from agents import Households
@@ -122,9 +121,9 @@ class AdaptationModel(Model):
         """
         # Define paths to flood maps
         flood_map_paths = {
-            'harvey': r'../input_data/floodmaps/Harvey_depth_meters.tif',
-            '100yr': r'../input_data/floodmaps/100yr_storm_depth_meters.tif',
-            '500yr': r'../input_data/floodmaps/500yr_storm_depth_meters.tif'  # Example path for 500yr flood map
+            'harvey': r'model/base_model_mesa/input_data/floodmaps/Harvey_depth_meters.tif',
+            '100yr': r'model/base_model_mesa/input_data/floodmaps/100yr_storm_depth_meters.tif',
+            '500yr': r'model/base_model_mesa/input_data/floodmaps/500yr_storm_depth_meters.tif'  # Example path for 500yr flood map
         }
 
         # Throw a ValueError if the flood map choice is not in the dictionary
@@ -239,11 +238,11 @@ class AdaptationModel(Model):
 
     def step(self):
         """
-        At step 10 there will be a flood
+        At step 14 there will be a flood
         """
 
         # adapt agents right before flood
-        if self.schedule.steps == 10:
+        if self.schedule.steps == 14:
             for agent in self.schedule.agents:
                 if agent.flood_damage_estimated * 100000 > agent.loss_tolerance + self.cost_of_adaptation:
                     agent.is_adapted = True
