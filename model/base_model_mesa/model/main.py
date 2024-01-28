@@ -35,12 +35,13 @@ EXPERIMENT:
 
 from model import AdaptationModel
 import matplotlib.pyplot as plt
-import networkx as nx
 from tqdm import tqdm
 import pandas as pd
 from scipy.stats import truncnorm, norm
 import numpy as np
 import concurrent.futures
+import datetime
+import pathlib
 
 
 
@@ -59,7 +60,7 @@ def run_simulation(p):
         arr.append(model_df.iloc[-1]["winners"])
     return p, arr
 
-def plot_data(p, arr):
+def plot_data(p, arr, dir):
     N, BINS, _ = plt.hist(arr)
     mu, std = norm.fit(arr)
     xmin, xmax = plt.xlim()
@@ -68,11 +69,13 @@ def plot_data(p, arr):
     scaling_factor = N.sum() * np.diff(BINS)[0]
     plt.plot(x, scaling_factor * pdf, 'k', linewidth=2)
     plt.title(f"p={p}")
-    plt.savefig(f"hist_{p}.png")
+    plt.savefig(f"{dir}/hist_{p}.png")
     plt.close()
     return p, mu, std
 
 def run_batch():
+    dir = f'results/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
+    pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
     res = []
     with concurrent.futures.ProcessPoolExecutor() as executor:
         futures = [executor.submit(run_simulation, p) for p in [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 95]]
@@ -80,10 +83,10 @@ def run_batch():
         with tqdm(total=len(futures)) as pbar:
             for future in concurrent.futures.as_completed(futures):
                 p, arr = future.result()
-                res.append(plot_data(p, arr))
+                res.append(plot_data(p, arr, dir))
                 pbar.update(1)
 
-    np.savetxt("results.csv", np.array(res), delimiter=",")
+    np.savetxt(f"{dir}/hist_data.csv", np.array(res), delimiter=",")
 
 if __name__ == "__main__":
     run_batch()
