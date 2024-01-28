@@ -10,3 +10,6 @@
 # jupyter stuff
 .ipynb_checkpoints
 .ipynb
+
+# results
+model/base_model_mesa/model/results/
