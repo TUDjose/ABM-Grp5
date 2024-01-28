@@ -4,7 +4,6 @@ Develop an RBB that represents assimilative social influence with nominal opinio
 in a neighborhood.
 https://jasss.soc.surrey.ac.uk/20/4/2.html -> refer to sections 2.15-2.18
 """
-import numpy as np
 
 # TODO: change flood logic st stop after flood t.s. 15
 # TODO: after flood, check lost cost due to decisions/adaptations
@@ -40,48 +39,51 @@ import networkx as nx
 from tqdm import tqdm
 import pandas as pd
 from scipy.stats import truncnorm, norm
+import numpy as np
+import concurrent.futures
 
 
-def plot_network(ax, model):
-    pos = nx.spring_layout(model.G)
-    ax.clear()
-    colors = ['blue' if agent.opinion == 1 else 'red' for agent in model.schedule.agents]
-    nx.draw(model.G, pos, node_color=colors, with_labels=True, ax=ax)
-    ax.set_title(f"Social Network State at Step {model.schedule.steps}", fontsize=12)
-    # labels = nx.get_edge_attributes(model.G, 'weight')
-    # nx.draw_networkx_edge_labels(model.G, pos, edge_labels=labels)
-    plt.show()
 
-def run_model(p, n=100, plot=False, p_seed=0):
-    model = AdaptationModel(seed=0, number_of_households=n, flood_map_choice="harvey", network="watts_strogatz", polarization=p, p_seed=p_seed)
-    for step in range(7):
+def run_model(p, n=100, plot=False, steps=15):
+    model = AdaptationModel(seed=0, number_of_households=n, flood_map_choice="harvey", polarization=p, threshold=0.5)
+    for step in range(steps):
+        if plot: model.plot_network(big=True, labels=True)
         model.step()
-        if plot:
-            fig, ax = plt.subplots(figsize=(7, 7))
-            plot_network(ax, model)
-
+    if plot: model.plot_network(big=True, labels=True)
     return model, model.datacollector.get_agent_vars_dataframe(), model.datacollector.get_model_vars_dataframe()
 
+def run_simulation(p):
+    arr = []
+    for i in range(500):
+        model, agent_df, model_df = run_model(p, n=100, plot=False)
+        arr.append(model_df.iloc[-1]["winners"])
+    return p, arr
+
+def plot_data(p, arr):
+    N, BINS, _ = plt.hist(arr)
+    mu, std = norm.fit(arr)
+    xmin, xmax = plt.xlim()
+    x = np.linspace(xmin, xmax, 100)
+    pdf = norm.pdf(x, mu, std)
+    scaling_factor = N.sum() * np.diff(BINS)[0]
+    plt.plot(x, scaling_factor * pdf, 'k', linewidth=2)
+    plt.title(f"p={p}")
+    plt.savefig(f"hist_{p}.png")
+    plt.close()
+    return p, mu, std
+
+def run_batch():
+    res = []
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        futures = [executor.submit(run_simulation, p) for p in [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 95]]
+
+        with tqdm(total=len(futures)) as pbar:
+            for future in concurrent.futures.as_completed(futures):
+                p, arr = future.result()
+                res.append(plot_data(p, arr))
+                pbar.update(1)
+
+    np.savetxt("results.csv", np.array(res), delimiter=",")
 
 if __name__ == "__main__":
-    M, a, m = run_model(0.5, n=100, plot=True)
-
-
-    # with tqdm(total=500*11) as pbar:
-    #     for p in [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, .7, .8, .9, 95]:
-    #         arr = []
-    #         for i in range(500):
-    #             model, agent_df, model_df = run_model(0.05, n=100, plot=False, p_seed=i)
-    #             arr.append(model_df.iloc[-1]["total_positive_opinions"])
-    #             pbar.update(1)
-    #         N, BINS, _ = plt.hist(arr)
-    #         mu, std = norm.fit(arr)
-    #         print(p, mu, std)
-    #         xmin, xmax = plt.xlim()
-    #         x = np.linspace(xmin, xmax, 100)
-    #         pdf = norm.pdf(x, mu, std)
-    #         scaling_factor = N.sum() * np.diff(BINS)[0]
-    #         plt.plot(x, scaling_factor*pdf, 'k', linewidth=2)
-    #         plt.title(f"p={p}")
-    #         plt.savefig(f"hist_{p}.png")
-    #         plt.show()
+    run_batch()
