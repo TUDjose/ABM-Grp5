@@ -1,6 +1,7 @@
 from mesa import Agent
 from shapely.geometry import Point
 from shapely import contains_xy
+import numpy as np
 
 # Import functions from functions.py
 from functions import generate_random_location_within_map_domain, get_flood_depth, calculate_basic_flood_damage, floodplain_multipolygon
@@ -8,13 +9,17 @@ from functions import generate_random_location_within_map_domain, get_flood_dept
 
 # Define the Households agent class
 class Households(Agent):
+    """
+    Household agent class with the following attribute:
+    - opinion: nominal/discrete opinion (in this case between -1, 0, 1)
+    """
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
         self.unique_id = unique_id
         self.model = model
 
         self.is_adapted = False  # Initial adaptation status set to False
-        self.opinion = 0
+        self.opinion = int(np.random.choice([-1, 0, 1]))
         self.loss_tolerance = 50000 * self.opinion  # Initial loss tolerance
         self.loss = 0
 

@@ -1,13 +1,9 @@
 """
-RBB: Assimilative Social Influence, Nomina Opinions (e.g., my connection adapted/did not adapt)
+RBB: Assimilative Social Influence, Nominal Opinions (e.g., my connection adapted/did not adapt)
 Develop an RBB that represents assimilative social influence with nominal opinions affecting flood adaptation behaviors
 in a neighborhood.
 https://jasss.soc.surrey.ac.uk/20/4/2.html -> refer to sections 2.15-2.18
 """
-
-# TODO: change flood logic st stop after flood t.s. 15
-# TODO: after flood, check lost cost due to decisions/adaptations
-# TODO: track n of adaptations -> change datacollector logic
 # TODO: sensitivity analysis
 
 """"
@@ -37,7 +33,6 @@ from model import AdaptationModel
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import pandas as pd
-from scipy.stats import truncnorm, norm
 import numpy as np
 import concurrent.futures
 import datetime
@@ -45,46 +40,42 @@ import pathlib
 
 
 
-def run_model(p, n, plot=False):
-    model = AdaptationModel(seed=0, number_of_households=n, flood_map_choice="harvey", polarization=p, threshold=0.5)
+def run_model(p, n, plot=False, save=False):
+    model = AdaptationModel(number_of_households=n, polarization=p)
+    model.plot_network(big=True, labels=False) if plot else None
     for step in range(15):
-        if plot: model.plot_network(big=True, labels=True)
         model.step()
-    if plot: model.plot_network(big=True, labels=True)
+    model.plot_network(big=True, labels=False) if plot else None
 
-    dir = f'dataframes/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
-    pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
-    model.datacollector.get_agent_vars_dataframe().to_csv(f'{dir}/agent_df.csv')
-    model.datacollector.get_model_vars_dataframe().to_csv(f'{dir}/model_df.csv')
+    if save:
+        dir = f'dataframes/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
+        pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
+        model.datacollector.get_agent_vars_dataframe().to_csv(f'{dir}/agent_df.csv')
+        model.datacollector.get_model_vars_dataframe().to_csv(f'{dir}/model_df.csv')
 
     return model, model.datacollector.get_agent_vars_dataframe(), model.datacollector.get_model_vars_dataframe()
 
 def run_simulation(p):
     arr = []
-    for i in range(500):
+    for i in range(250):
         model, agent_df, model_df = run_model(p=p, n=100, plot=False)
-        arr.append(model_df.iloc[-1]["winners"])
+        arr.append(model_df.iloc[-1]["neutral"])
     return p, arr
 
 def plot_data(p, arr, dir):
     N, BINS, _ = plt.hist(arr)
-    mu, std = norm.fit(arr)
-    xmin, xmax = plt.xlim()
-    x = np.linspace(xmin, xmax, 100)
-    pdf = norm.pdf(x, mu, std)
-    scaling_factor = N.sum() * np.diff(BINS)[0]
-    plt.plot(x, scaling_factor * pdf, 'k', linewidth=2)
+    plt.vlines(np.mean(arr), 0, N.max(), colors="r", linestyles="dashed")
     plt.title(f"p={p}")
     plt.savefig(f"{dir}/hist_{p}.png")
     plt.close()
-    return p, mu, std
+    return p, np.mean(arr), np.std(arr)
 
 def run_batch():
     dir = f'results/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
     pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
     res = []
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        futures = [executor.submit(run_simulation, p) for p in [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 95]]
+        futures = [executor.submit(run_simulation, p) for p in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]]
 
         with tqdm(total=len(futures)) as pbar:
             for future in concurrent.futures.as_completed(futures):
@@ -94,3 +85,6 @@ def run_batch():
 
     np.savetxt(f"{dir}/hist_data.csv", np.array(res), delimiter=",")
 
+if __name__ == "__main__":
+    model, A, M = run_model(p=.1, n=40, plot=True)
+    print(M)
