@@ -1,21 +1,18 @@
 import random
-
+import matplotlib.pyplot as plt
 import mesa
 import networkx as nx
-from mesa import Model
-from mesa.time import RandomActivation
-from mesa.space import NetworkGrid
-from mesa.datacollection import DataCollector
-import geopandas as gpd
-import rasterio as rs
-import matplotlib.pyplot as plt
 import numpy as np
+import rasterio as rs
+from mesa import Model
+from mesa.datacollection import DataCollector
+from mesa.space import NetworkGrid
+from mesa.time import RandomActivation
 
 # Import the agent class(es) from agents.py
 from agents import Households
-
 # Import functions from functions.py
-from functions import get_flood_map_data, calculate_basic_flood_damage
+from functions import get_flood_map_data
 from functions import map_domain_gdf, floodplain_gdf
 
 
@@ -33,7 +30,8 @@ class AdaptationModel(Model):
                  number_of_nearest_neighbours=5,
                  polarization=0.5,  # 0 - 1
                  cost_of_adaptation=50000,
-                 max_neighbors=5
+                 max_neighbors=5,
+                 neutral_importance=2,
                  ):
 
         super().__init__(seed=seed)
@@ -43,11 +41,12 @@ class AdaptationModel(Model):
         self.number_of_households = number_of_households
         self.polarization = polarization
         self.probability_of_network_connection = probability_of_network_connection
-        self.number_of_nearest_neighbours = number_of_nearest_neighbours
+        self.number_of_nearest_neighbours = max_neighbors
         self.max_neighbors = max_neighbors
 
         # model variables
         self.cost_of_adaptation = cost_of_adaptation
+        self.neutral_importance = neutral_importance
 
         # generating the graph according to the network used and the network parameters specified
         self.G = self.initialize_network()
@@ -64,16 +63,15 @@ class AdaptationModel(Model):
         # create households through initiating a household on each node of the network graph
         for i, node in enumerate(self.G.nodes()):
             household = Households(unique_id=i, model=self)
-            # household.opinion = int(np.random.choice([-1, 0, 1]))   # set initial opinion
             self.schedule.add(household)
             self.grid.place_agent(agent=household, node_id=node)
 
         # Data collection setup to collect data
         model_metrics = {
-            "adapted": self.total_adapted_households,
-            "positive": self.total_positive_opinions,
-            "negative": self.total_negative_opinions,
-            "neutral": self.total_neutral_opinions,
+            "adapted": lambda m: sum([1 for agent in self.schedule.agents if agent.is_adapted]),
+            "positive": lambda m: sum([1 for agent in self.schedule.agents if agent.opinion == 1]),
+            "negative": lambda m: sum([1 for agent in self.schedule.agents if agent.opinion == -1]),
+            "neutral": lambda m: sum([1 for agent in self.schedule.agents if agent.opinion == 0]),
             "losers": lambda m: sum([1 for agent in self.schedule.agents if agent.loss > 0]),
             "winners": lambda m: sum([1 for agent in self.schedule.agents if agent.loss < 0])
         }
@@ -113,21 +111,6 @@ class AdaptationModel(Model):
         self.band_flood_img, self.bound_left, self.bound_right, self.bound_top, self.bound_bottom = get_flood_map_data(
             self.flood_map)
 
-    def total_adapted_households(self):
-        """Return the total number of households that have adapted."""
-        # BE CAREFUL THAT YOU MAY HAVE DIFFERENT AGENT TYPES SO YOU NEED TO FIRST CHECK IF THE AGENT IS ACTUALLY A HOUSEHOLD AGENT USING "ISINSTANCE"
-        adapted_count = sum([1 for agent in self.schedule.agents if isinstance(agent, Households) and agent.is_adapted])
-        return adapted_count
-
-    def total_positive_opinions(self):
-        return sum([1 for agent in self.schedule.agents if isinstance(agent, Households) and agent.opinion == 1])
-
-    def total_negative_opinions(self):
-        return sum([1 for agent in self.schedule.agents if isinstance(agent, Households) and agent.opinion == -1])
-
-    def total_neutral_opinions(self):
-        return sum([1 for agent in self.schedule.agents if isinstance(agent, Households) and agent.opinion == 0])
-
     def plot_model_domain_with_agents(self):
         fig, ax = plt.subplots()
         map_domain_gdf.plot(ax=ax, color='lightgrey')
@@ -160,15 +143,13 @@ class AdaptationModel(Model):
                         ha='center', fontsize=9 if not big else 15)
 
         nx.draw_networkx_edges(self.G, pos, arrows=False, alpha=0.5)
-        # nx.draw(self.G, pos, node_color=colors, with_labels=True)
+
         if labels:
             labels = nx.get_edge_attributes(self.G, 'weight')
             nx.draw_networkx_edge_labels(self.G, pos, edge_labels=labels)
-            # edge_labels = nx.get_edge_attributes(self.G, 'weight')
-            # edge_label_pos = {u: (pos[u] + pos[v]) / 2 for u, v in self.G.edges()}
-            # nx.draw_networkx_edge_labels(self.G, pos=edge_label_pos, edge_labels=edge_labels, font_color='red', label_pos=0.5)
 
         ax.set_title(f"Social Network State at Step {self.schedule.steps}", fontsize=12)
+        plt.savefig(f'plots/network_{self.schedule.steps}_{self.polarization}.png')
         plt.show()
 
     def get_neighbors(self, agent):
@@ -187,7 +168,7 @@ class AdaptationModel(Model):
                     seed=self.seed)
 
         graph = nx.minimum_spanning_tree(G)
-        weights = {edge: np.random.uniform(0,1) for edge in graph.edges}
+        weights = {edge: np.around(np.random.uniform(0,1), 4) for edge in graph.edges}
         WSDG = nx.DiGraph()
 
         for edge, weight in weights.items():
@@ -203,8 +184,8 @@ class AdaptationModel(Model):
             neighbors = [self.schedule.agents[edge[1]] for edge in self.G.out_edges(agent.unique_id)]
             if len(neighbors) < self.max_neighbors:  # only create new edges when agents have less than max_neighbors
                 for other in self.schedule.agents:
-                    if other != agent and other not in neighbors and any(
-                            n for n in self.get_neighbors(other) if n in self.get_neighbors(agent)):
+                    if (other != agent and other not in neighbors and
+                            any(n for n in self.get_neighbors(other) if n in self.get_neighbors(agent))):
                         edges.append((agent.unique_id, other.unique_id))
 
         # prune edge list to remove duplicates
@@ -212,16 +193,19 @@ class AdaptationModel(Model):
             if (edge[1], edge[0]) in edges:
                 edges.remove((edge[1], edge[0]))
 
+        self.created_edges = []
         for edge in edges:
+            w = np.around(np.random.uniform(0, 1), decimals=4)
             if np.random.uniform(0, 1) < self.polarization:  # add edge between agent and 2nd degree neighbor (other)
-                self.G.add_edge(edge[0], edge[1], weight=np.random.uniform(0, 1))
-                self.G.add_edge(edge[1], edge[0], weight=np.random.uniform(0, 1))
-
+                self.G.add_edge(edge[0], edge[1], weight=w)
+                self.G.add_edge(edge[1], edge[0], weight=w)
+                self.created_edges.append(edge)
             else:  # add edge to other random node not in neighbors and not corresponding to an existing edge
                 random_node = random.choice([n for n in self.schedule.agents if n not in self.get_neighbors_from_id(edge[0])
                                              and n != self.schedule.agents[edge[0]] and (edge[0], n.unique_id) not in self.G.edges])
-                self.G.add_edge(edge[0], random_node.unique_id, weight=np.random.uniform(0, 1))
-                self.G.add_edge(random_node.unique_id, edge[0], weight=np.random.uniform(0, 1))
+                self.G.add_edge(edge[0], random_node.unique_id, weight=w)
+                self.G.add_edge(random_node.unique_id, edge[0], weight=w)
+                self.created_edges.append((edge[0], random_node.unique_id))
 
     def revise_neutral_weights(self):
         """Revise the weights of the edges from neutral agents to increase the influence of neutral agents."""
@@ -229,7 +213,7 @@ class AdaptationModel(Model):
             neighbors = [self.schedule.agents[edge[1]] for edge in self.G.out_edges(agent.unique_id)]
             for nbor in neighbors:
                 if nbor.opinion == 0:
-                    self.G[nbor.unique_id][agent.unique_id]['weight'] *= 2.5
+                    self.G[nbor.unique_id][agent.unique_id]['weight'] *= self.neutral_importance
 
     @staticmethod
     def nominal_opinions(model: mesa.Model, network: nx.DiGraph) -> None:
@@ -242,7 +226,7 @@ class AdaptationModel(Model):
         O[i, t] is the opinion of agent i at time t, considered to be either -1, 0 or 1
 
         params:
-            mesa_model: the mesa model with the agents containing a nominal/discrete opinion parameter
+            model: the mesa model with the agents containing a nominal/discrete opinion parameter
             network: directional graph connecting the agents in the model with weighted edges
         """
 

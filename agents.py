@@ -39,12 +39,6 @@ class Households(Agent):
         self.flood_depth_actual = 0
         self.flood_damage_actual = calculate_basic_flood_damage(flood_depth=self.flood_depth_actual)
 
-
-    def count_friends(self, radius):
-        """Count the number of neighbors within a given radius (number of edges away). This is social relation and not spatial"""
-        friends = self.model.grid.get_neighborhood(self.pos, include_center=False, radius=radius)
-        return len(friends)
-
     def step(self):
         self.loss_tolerance = self.opinion * 50000
 

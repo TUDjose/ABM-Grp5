@@ -12,6 +12,7 @@ add in description of the ABM
 To run the model, run the following command in the terminal, where the parameters are:
 - p: polarization parameter
 - n: number of households
+- plot: whether to plot the model or not
 ```bash
 python -m run -p 0.6 -n 100 -plot
 ```
@@ -22,5 +23,5 @@ python -m run --function run_batch
 ```
 
 ## Reusable Building Block
-Can find the code for the RBB in `rbb.py` and the link to the RBB description in the following link: \
+Can find the code for the RBB in `model.py` and the link to the RBB description in the following link: \
 https://www.agentblocks.org/admin/rbb
