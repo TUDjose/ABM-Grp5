@@ -4,6 +4,8 @@ Develop an RBB that represents assimilative social influence with nominal opinio
 in a neighborhood.
 https://jasss.soc.surrey.ac.uk/20/4/2.html -> refer to sections 2.15-2.18
 """
+import networkx as nx
+
 # TODO: sensitivity analysis
 
 """"
@@ -41,34 +43,38 @@ import os
 
 
 
-def run_model(p, n, plot=False, save=False, neutral=2.5):
-    model = AdaptationModel(number_of_households=n, polarization=p, neutral_importance=neutral)
+def run_model(p, n, mn=5, plot=False, save=False, neutral=2.5):
+    model = AdaptationModel(number_of_households=n, polarization=p, neutral_importance=neutral, max_neighbors=mn,
+                            probability_of_network_connection=0.4)
     model.plot_network(big=False, labels=False) if plot else None
     for step in range(15):
         model.step()
     model.plot_network(big=False, labels=False) if plot else None
-
+    # model.plot_model_domain_with_agents() if plot else None
     if save:
         dir = f'dataframes/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
         pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
         model.datacollector.get_agent_vars_dataframe().to_csv(f'{dir}/agent_df.csv')
         model.datacollector.get_model_vars_dataframe().to_csv(f'{dir}/model_df.csv')
 
-    return model, model.datacollector.get_agent_vars_dataframe(), model.datacollector.get_model_vars_dataframe()
+    return model, model.datacollector.get_agent_vars_dataframe(), model.datacollector.get_model_vars_dataframe(), nx.is_strongly_connected(model.G)
 
-def run_simulation(p, nbors):
-    ARR = []
+def run_simulation(p=1, nbors=5, house=100, neutral=2):
+    NEUTRAL = []
+    CONNECTED = []
     for _ in range(100):
         m = AdaptationModel(
-            number_of_households=100,
+            number_of_households=house,
             polarization=p,
-            neutral_importance=1.8,
+            neutral_importance=neutral,
             max_neighbors=nbors
         )
         for _ in range(15):
             m.step()
-        ARR.append(m.datacollector.get_model_vars_dataframe().iloc[-1]["neutral"])
-    return p, ARR
+
+        NEUTRAL.append(m.datacollector.get_model_vars_dataframe().iloc[-1]["neutral"])
+        CONNECTED.append(1 if nx.is_strongly_connected(m.G) else 0)
+    return p, nbors, house, neutral, NEUTRAL, CONNECTED
 
 def run_batch():
     dir = f'results/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
@@ -87,23 +93,22 @@ def run_batch():
     analysis(f"{dir}/hist_data.csv")
 
 
-def polarization_and_neighbours():
+def run_batch_2d():
     dir = f'results/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
     pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
-    for nbors in [1,2,3,4,5,6,7,8,9,10]:
+    for nbors in [2,3,4,5]:
         res = []
         with (concurrent.futures.ProcessPoolExecutor()
               as executor):
-            futures = [executor.submit(run_simulation, p, nbors) for p in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]]
+            futures = [executor.submit(run_simulation, p, nbors, 100, 2) for p in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8,  0.9, 1]]
 
             with tqdm(total=len(futures)) as pbar:
                 for future in concurrent.futures.as_completed(futures):
-                    p, arr = future.result()
-                    res.append(np.concatenate((np.array([p]), [np.mean(arr)])))
+                    P, NBORS, HOUSE, NEUTRAL, ARR1, ARR2 = future.result()
+                    res.append([P, NBORS, HOUSE, NEUTRAL, np.mean(ARR1), np.sum(ARR2)/100])
                     pbar.update(1)
 
         np.savetxt(f"{dir}/data_pmn_{nbors}.csv", np.array(res), delimiter=",")
-    analysis_2d(dir+'/', [1,2,3,4,5,6,7,8,9,10], 9, -4, 'Maximum number of neighbours 2')
 
 def analysis(dir):
     res = np.loadtxt(dir, delimiter=",")
@@ -137,12 +142,8 @@ def analysis_2d(dir, cols, min, max, x):
 
 
 if __name__ == '__main__':
-    # run_batch()
-    # analysis('results/20240131-175242/hist_data.csv')
-    # polarization_and_neighbours()
-    # analysis_2d("results/20240131-151454/",[1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 2.0, 2.5, 3.0], 16, -4, 'Neutral importance')
-    # analysis_2d('results/20240131-154105/', [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],10, -4, 'Probability of network connection')
-    # analysis_2d('results/20240131-161525/', [2,3,4,5,6,7,8,9,10], 9, -4, 'Number of nearest neighbours')
-    # analysis_2d('results/20240201-154855/', [2,3,4,5,6,7,8,9,10], 9, -4, 'Maximum number of neighbours')
-    run_model(1, 100, plot=True, save=False, neutral=1.5)
+    # run_batch_2d()
+    run_model(0.5, 100, neutral=1.8, mn=5, plot=True, save=True)
+
+
 

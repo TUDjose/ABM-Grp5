@@ -149,7 +149,7 @@ class AdaptationModel(Model):
             nx.draw_networkx_edge_labels(self.G, pos, edge_labels=labels)
 
         ax.set_title(f"Social Network State at Step {self.schedule.steps}", fontsize=12)
-        plt.savefig(f'plots/network_{self.schedule.steps}_{self.polarization}.png')
+        # plt.savefig(f'plots/network_{self.polarization}_{self.max_neighbors}.png')
         plt.show()
 
     def get_neighbors(self, agent):
